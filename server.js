@@ -1,64 +1,112 @@
+require("dotenv").config();
+
 const express = require("express");
+const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
 const crypto = require("crypto");
 
 const app = express();
 app.use(express.json());
+app.use(helmet());
 
-// In-memory storage (test only)
-const sessions = new Map();
-const keys = new Set();
+/* ================= RATE LIMIT ================= */
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10, // 10 req/min per IP
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(limiter);
 
-// Generate random key
+/* ================= IN-MEMORY DB =================
+   Replace with Mongo/SQLite later
+*/
+const database = {
+  keys: {}
+};
+
+/* ================= UTILS ================= */
 function generateKey() {
-    return crypto.randomBytes(16).toString("hex").toUpperCase();
+  return crypto.randomBytes(16).toString("hex").toUpperCase();
 }
 
-// Generate session ID
-function generateSession() {
-    return crypto.randomBytes(12).toString("hex");
+function hash(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-// Create session
-app.post("/session", (req, res) => {
-    const session = generateSession();
-    sessions.set(session, Date.now() + 5 * 60 * 1000); // 5 min
-    res.json({ session });
-});
-
-// Generate key (admin/test)
+/* ================= ADMIN KEY GENERATION =================
+   PROTECTED BY SECRET
+*/
 app.post("/genkey", (req, res) => {
-    const key = generateKey();
-    keys.add(key);
-    console.log("Generated key:", key);
-    res.json({ key });
+  const adminSecret = req.headers["x-admin-secret"];
+
+  if (adminSecret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  const key = generateKey();
+
+  database.keys[key] = {
+    used: false,
+    userId: null,
+    hwid: null,
+    ip: null,
+    createdAt: Date.now()
+  };
+
+  res.json({ key });
 });
 
-// Redeem key
-app.post("/redeem", (req, res) => {
-    const { session, key } = req.body;
+/* ================= KEY VALIDATION (ROBLOX CALLS THIS) ================= */
+app.post("/validate", (req, res) => {
+  const { key, userId, hwid } = req.body;
+  const ip =
+    req.headers["x-forwarded-for"] ||
+    req.socket.remoteAddress;
 
-    if (!sessions.has(session)) {
-        return res.status(403).json({ success: false });
-    }
+  if (!key || !userId || !hwid) {
+    return res.json({ valid: false });
+  }
 
-    if (Date.now() > sessions.get(session)) {
-        sessions.delete(session);
-        return res.status(403).json({ success: false });
-    }
+  const record = database.keys[key];
+  if (!record) {
+    return res.json({ valid: false });
+  }
 
-    if (!keys.has(key)) {
-        return res.status(401).json({ success: false });
-    }
+  const hwidHash = hash(hwid);
 
-    // Redeem
-    keys.delete(key);
-    sessions.delete(session);
+  // FIRST USE → BIND
+  if (!record.used) {
+    record.used = true;
+    record.userId = String(userId);
+    record.hwid = hwidHash;
+    record.ip = ip;
 
-    res.json({ success: true });
+    return res.json({ valid: true, first: true });
+  }
+
+  // ALREADY USED → VERIFY
+  if (
+    record.userId !== String(userId) ||
+    record.hwid !== hwidHash
+  ) {
+    return res.json({
+      valid: false,
+      reason: "Key bound to another device"
+    });
+  }
+
+  res.json({ valid: true });
 });
 
-// Start server
+/* ================= ERROR HANDLER ================= */
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: "Internal Server Error" });
+});
+
+/* ================= START ================= */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log("Auth server running on port", PORT);
-});
+app.listen(PORT, () =>
+  console.log(`Antares API running on port ${PORT}`)
+);
