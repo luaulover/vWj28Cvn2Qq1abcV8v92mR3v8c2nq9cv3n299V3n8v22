@@ -1,3 +1,19 @@
+const TIERS = {
+  trial: {
+    duration: 14 * 24 * 60 * 60 * 1000, // 14 days
+    bind: false
+  },
+  monthly: {
+    duration: 30 * 24 * 60 * 60 * 1000, // 30 days
+    bind: true
+  },
+  permanent: {
+    duration: null, // no expiration
+    bind: true
+  }
+}
+
+
 const express = require("express");
 const bodyParser = require("body-parser");
 
