@@ -1,0 +1,42 @@
+print("=== FASTFLAG TEST START ===")
+
+-- 1. Check functions exist
+print("flag type 1:", typeof(getfflag))
+print("flag type 2:", typeof(setfflag))
+
+-- 2. Pick a VERY common flag (exists on all PC clients)
+local FLAG = "DebugSkyGray"
+
+-- 3. Read before
+local before
+local ok1, err1 = pcall(function()
+    before = getfflag(FLAG)
+end)
+
+print("flag type 1 success:", ok1)
+print("Before value:", before)
+
+-- 4. Attempt to set
+local ok2, err2 = pcall(function()
+    setfflag(FLAG, "True")
+end)
+
+print("flag type 2 success:", ok2)
+
+-- 5. Read after
+local after
+local ok3, err3 = pcall(function()
+    after = getfflag(FLAG)
+end)
+
+print("success after:", ok3)
+print("After value:", after)
+
+-- 6. Final verdict
+if ok1 and ok2 and ok3 and before ~= after then
+    print("fastflags available")
+else
+    warn("fastflags unavailable")
+end
+
+print("=== test end ===")
